@@ -13,6 +13,7 @@ Everything is pretty much the same as for Phishtank-2.0:
 5. Uses the YOURLS admin section for option setting. No config files
 6. Integrates with the [Compliance](https://github.com/joshp23/YOURLS-Compliance) flaglist to track links that have "gone bad"
 7. Option to set default error message
+8. Option to whitelist domains
 
 ## Requirements
 1. A working YOURLS installation
