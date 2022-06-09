@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: YA Phish Checker
-Plugin URI: https://github.com/stefanmm/ya-phish-checker
+Plugin URI: https://github.com/stefanmm/YOURLS-ya-phish-checker
 Description: Yet Another Phish Checker - Prevent shortening malware URLs using ipqualityscore.com API (fork of phishtank-2.0)
 Version: 1.1
 Author: Stefan Marjanov
