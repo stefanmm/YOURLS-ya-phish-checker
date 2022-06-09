@@ -1,9 +1,9 @@
 <?php
 /*
 Plugin Name: YA Phish Checker
-Plugin URI: https://github.com/stefanmm/YOURLS-ya-phish-checker
+Plugin URI: https://github.com/stefanmm/ya-phish-checker
 Description: Yet Another Phish Checker - Prevent shortening malware URLs using ipqualityscore.com API (fork of phishtank-2.0)
-Version: 1.0
+Version: 1.1
 Author: Stefan Marjanov
 Author URI: https://www.stefanmarjanov.com/
 */
@@ -20,7 +20,7 @@ function yapc_add_page() {
 
 // Display admin page
 function yapc_do_page() {
-
+	$is_page_updated = "";
 	// Check if a form was submitted
 	if( isset( $_POST['yapc_api_key'] ) ) {
 		// Check nonce
@@ -32,6 +32,11 @@ function yapc_do_page() {
 		if(isset($_POST['yapc_recheck'])) yourls_update_option( 'yapc_recheck', $_POST['yapc_recheck'] );
 		if(isset($_POST['yapc_soft'])) yourls_update_option( 'yapc_soft', $_POST['yapc_soft'] );
 		if(isset($_POST['yapc_cust_toggle'])) yourls_update_option( 'yapc_cust_toggle', $_POST['yapc_cust_toggle'] );
+		if(isset($_POST['whitelist_form'])){
+			$whitelist_form = explode ( "\r\n" , $_POST['whitelist_form'] );
+			yourls_update_option ('yapc_whitelisted', serialize($whitelist_form));
+		}
+		$is_page_updated = "Settings saved!";
 	}
 
 	// Get values from database
@@ -41,7 +46,11 @@ function yapc_do_page() {
 	$yapc_soft = yourls_get_option( 'yapc_soft' );
 	$yapc_cust_toggle = yourls_get_option( 'yapc_cust_toggle' );
 	$yapc_intercept = yourls_get_option( 'yapc_intercept' );
-
+	$whitelist = yourls_get_option ('yapc_whitelisted');
+	if($whitelist){
+		$whitelist = implode ( "\r\n" , unserialize ( $whitelist ) );
+	}
+	
 	// set defaults
 	if ($yapc_recheck !== "false") {
 		$rck_chk = 'checked';
@@ -78,7 +87,7 @@ function yapc_do_page() {
 		<p><label for="yapc_api_key">Your Private API Key:  </label> <input type="password" autocomplete="false" size=60 id="yapc_api_key" name="yapc_api_key" value="$yapc_api_key" /></p>
 
 		<h2>Redirect Rechecks: old links behavior</h2>
-		<p>Old links can be re-checked every time that they are clicked. <b>Default behavior is to check them</b>. Important: this will increase number of API calls.</p>
+		<p>Old links can be re-checked every time that they are clicked. <b>Default behavior is to check them</b>. Important: every URL redirect = 1 API call. Whitelisted domains will not be checked.</p>
 
 		<div class="checkbox">
 		  <label>
@@ -109,12 +118,34 @@ function yapc_do_page() {
 				<p><label for="yapc_intercept">Intercept URL </label> <input type="text" size=40 id="yapc_intercept" name="yapc_intercept" value="$yapc_intercept" /></p>
 			</div>
 		</div>
+		<h2>Whitelist domains</h2>
+		<p>Domains from this list will NOT be checked for spam! <strong>API will not be called</strong>. One domain per line. Example: domain.com will match its sub-domains (like www.domain.com) as well as all sub-pages (like domain.com/page) and combinations (like www.domain.com/page)</p>
+		<p><textarea cols="60" rows="15" name="whitelist_form">$whitelist</textarea></p>
+		
 		<h2>Other settings</h2>
 		<p><label for="yapc_err_msg">Default error message:  </label> <input type="text" size=60 id="yapc_err_msg" name="yapc_err_msg" value="$yapc_err_msg" /></p>
-		<p><input type="submit" value="Submit" /></p>
+		<p><input type="submit" value="Save settings" style="cursor: pointer;padding: 5px 14px;" /></p>
 		</form>
+		<div>$is_page_updated</div>
 		</div>
 HTML;
+}
+
+// Check if URL is whitelisted
+function yapc_is_whitelisted( $url ) {
+	$whitelisted = false;
+	
+	$whitelist = yourls_get_option ('yapc_whitelisted');
+	if ( $whitelist ) {
+		$whitelist = unserialize ( $whitelist );
+		foreach($whitelist as $whitelist_domain) {
+			if ( strpos($url, $whitelist_domain) ) {
+				$whitelisted = true;
+				break;
+			}
+		}
+	}
+	return $whitelisted;
 }
 
 // Check yapc when a new link is added
@@ -149,6 +180,7 @@ function yapc_check_redirect( $url, $keyword = false ) {
 			$keyword = $url[1];
 			$url = $url[0];
 		}
+
 		// Check when the link was added
 		// If shorturl is fresh (ie probably clicked more often?) check once every 10 times, otherwise check every time
 		// Define fresh = 3 days = 259200 secondes
@@ -175,14 +207,16 @@ function yapc_check_redirect( $url, $keyword = false ) {
 					if (($yapc_cust_toggle == "true") && ($yapc_intercept !== '')) {
 						// How to pass keyword and url to redirect?
 						yourls_redirect( $yapc_intercept, 302 );
-						die ();
+						die();
 					}
 					// Or go to default flag intercept 
 					yapc_display_phlagpage( $keyword );
 				} else {
-				// Otherwise delete & die
-				yourls_delete_link_by_keyword( $keyword );
-				yourls_die( 'The page that you are trying to visit has been blacklisted. We have deleted this link from our records. Have a nice day', 'Domain blacklisted', '403' );
+					// Otherwise delete & die
+					yourls_delete_link_by_keyword( $keyword );
+					http_response_code(403);
+					echo "<div style='margin: 20px auto 20px auto;'><center><p>The page that you are trying to visit has been blacklisted. We have deleted this link from our records. Have a nice day.</p></center></div>";
+					die();
 				} 
 			}
 		}
@@ -226,10 +260,15 @@ function yapc_is_blacklisted( $url ) {
 	// Remove www. from domain (but not from www.com)
 	$parsed['host'] = preg_replace( '/^www\.(.+\.)/i', '$1', $parsed['host'] );
 	
+	// Return early if domain is whitelisted
+	if( yapc_is_whitelisted($url) ){
+		return yourls_apply_filter( 'yapc_clean', false );
+	}
+	
 	// encoded url
 	$url = urlencode($url);
 	
-	// ipqualityscore API
+	// ipqualityscore API key
 	$yapc_api_key = yourls_get_option( 'yapc_api_key' );
 
 	$parameters = array(
